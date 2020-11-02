@@ -98,7 +98,8 @@ class GLMP(nn.Module):
         # Encode and Decode
         use_teacher_forcing = random.random() < args['teacher_forcing_ratio'] 
         max_target_length = max(data['response_lengths'])
-        all_decoder_outputs_vocab, all_decoder_outputs_ptr, _, _, global_pointer = self.encode_and_decode(data, max_target_length, use_teacher_forcing, False)
+        all_decoder_outputs_vocab, all_decoder_outputs_ptr, _, _, global_pointer\
+             = self.encode_and_decode(data, max_target_length, use_teacher_forcing, False)
         
         # Loss calculation and backpropagation
         loss_g = self.criterion_bce(global_pointer, data['selector_index'])
