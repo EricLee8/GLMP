@@ -45,15 +45,16 @@ def read_langs(file_name, max_line = None):
                     ptr_index = []
                     for key in r.split():
                         index = [loc for loc, val in enumerate(context_arr) if (val[0] == key and key in ent_index)]
+                        # 找到回复中的实体，且该实体在对话历史中出现过，记录其在对话历史中的位置（loc）
                         if (index):
-                            index = max(index) 
+                            index = max(index) # 为了保证唯一性，记录该实体在对话历史中出现的最大位置
                         else: 
                             index = len(context_arr)
-                        ptr_index.append(index)
+                        ptr_index.append(index) # 对response中的每一个位置都记录这个index，若没有出现在对话历史中就记n+l+1，详见论文
 
                     # Get global pointer labels for words in system response, the 1 in the end is for the NULL token
                     selector_index = [1 if (word_arr[0] in ent_index or word_arr[0] in r.split()) else 0 for word_arr in context_arr] + [1]
-                    
+                    # 注意这里context_arr包含了KB的信息！！！
                     sketch_response = generate_template(global_entity, r, gold_ent, kb_arr, task_type)
                     
                     data_detail = {
@@ -79,12 +80,12 @@ def read_langs(file_name, max_line = None):
                     if max_resp_len < len(r.split()):
                         max_resp_len = len(r.split())
                     sample_counter += 1
-                else:
+                else: # deal with Knowledge Base
                     r = line
                     kb_info = generate_memory(r, "", str(nid))
                     context_arr = kb_info + context_arr
                     kb_arr += kb_info
-            else:
+            else: # 空行，初始化
                 cnt_lin += 1
                 context_arr, conv_arr, kb_arr = [], [], []
                 if(max_line and cnt_lin >= max_line):
@@ -134,9 +135,17 @@ def generate_memory(sent, speaker, time):
     if speaker=="$u" or speaker=="$s":
         for idx, word in enumerate(sent_token):
             temp = [word, speaker, 'turn'+str(time), 'word'+str(idx)] + ["PAD"]*(MEM_TOKEN_SIZE-4)
+            # 这里其实就是扩展了一个men的维度，把sentence里面的一个token变成了token + speaker + turn + idx + PAD*2的六元组...
             sent_new.append(temp)
     else:
         sent_token = sent_token[::-1] + ["PAD"]*(MEM_TOKEN_SIZE-len(sent_token))
+        # 这里为什么要反转sent_token呢，因为在response中出现的实体，一定取自数据集里知识库栏的最后一个元素...
+        # 如：
+        '''
+        0 6_miles road_block_nearby coffee_or_tea_place poi teavana
+        0 teavana distance 6_miles
+        '''
+        # 实体只会是teavana、6_miles，不会是distance、coffee_or_tea_place
         sent_new.append(sent_token)
     return sent_new
 
@@ -151,9 +160,9 @@ def prepare_data_seq(task, batch_size=100):
     pair_test, test_max_len = read_langs(file_test, max_line=None)
     max_resp_len = max(train_max_len, dev_max_len, test_max_len) + 1
     
-    lang = Lang()
+    lang = Lang() # 其实就是建立一个有word2idx和idx2word的词表
 
-    train = get_seq(pair_train, lang, batch_size, True)
+    train = get_seq(pair_train, lang, batch_size, True) # 返回dataloader
     dev   = get_seq(pair_dev, lang, batch_size, False)
     test  = get_seq(pair_test, lang, batch_size, False)
     

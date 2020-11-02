@@ -38,6 +38,7 @@ parser.add_argument('-abh','--ablationH', help='ablation context embedding', typ
 parser.add_argument('-rec','--record', help='use record function during inference', type=int, required=False, default=0)
 # parser.add_argument('-beam','--beam_search', help='use beam_search during inference, default is greedy search', type=int, required=False, default=0)
 # parser.add_argument('-viz','--vizualization', help='vizualization', type=int, required=False, default=0)
+parser.add_argument('-cd','--cuda', type=str, default='0', help='which device to use', required=False)
 
 args = vars(parser.parse_args())
 print(str(args))

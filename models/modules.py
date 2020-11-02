@@ -23,18 +23,19 @@ class ContextRNN(nn.Module):
 
     def forward(self, input_seqs, input_lengths, hidden=None):
         # Note: we run this all at once (over multiple batches of multiple sequences)
-        embedded = self.embedding(input_seqs.contiguous().view(input_seqs.size(0), -1).long()) 
-        embedded = embedded.view(input_seqs.size()+(embedded.size(-1),))
-        embedded = torch.sum(embedded, 2).squeeze(2) 
+        # the shape of input_seqs is [seq_len, bsz, memory_size(which is 6 for KVR dataset)]
+        embedded = self.embedding(input_seqs.contiguous().view(input_seqs.size(0), -1).long()) # (seqlen, bsz*msz, embsz)
+        embedded = embedded.view(input_seqs.size()+(embedded.size(-1),)) # (seqlen, bsz, msz, embsz)
+        embedded = torch.sum(embedded, 2).squeeze(2) # (seqlen, bsz, embsz), sum along the memory_size dimension
         embedded = self.dropout_layer(embedded)
         hidden = self.get_state(input_seqs.size(1))
         if input_lengths:
             embedded = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths, batch_first=False)
         outputs, hidden = self.gru(embedded, hidden)
         if input_lengths:
-           outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=False)   
-        hidden = self.W(torch.cat((hidden[0], hidden[1]), dim=1)).unsqueeze(0)
-        outputs = self.W(outputs)
+           outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=False)
+        hidden = self.W(torch.cat((hidden[0], hidden[1]), dim=1)).unsqueeze(0) # (1, bsz, hsz)
+        outputs = self.W(outputs) # (slen, bsz, hsz)
         return outputs.transpose(0,1), hidden
 
 
@@ -60,15 +61,15 @@ class ExternalKnowledge(nn.Module):
             full_memory[bi, start:end, :] = full_memory[bi, start:end, :] + hiddens[bi, :conv_len[bi], :]
         return full_memory
 
-    def load_memory(self, story, kb_len, conv_len, hidden, dh_outputs):
+    def load_memory(self, story, kb_len, conv_len, hidden, dh_outputs): # 我悟了，dh是dialog history的意思...
         # Forward multiple hop mechanism
         u = [hidden.squeeze(0)]
-        story_size = story.size()
+        story_size = story.size() # (bsz, slen, memory_size)
         self.m_story = []
         for hop in range(self.max_hops):
             embed_A = self.C[hop](story.contiguous().view(story_size[0], -1))#.long()) # b * (m * s) * e
-            embed_A = embed_A.view(story_size+(embed_A.size(-1),)) # b * m * s * e
-            embed_A = torch.sum(embed_A, 2).squeeze(2) # b * m * e
+            embed_A = embed_A.view(story_size+(embed_A.size(-1),)) # b * seqlen * msz * e
+            embed_A = torch.sum(embed_A, 2).squeeze(2) # b * seqlen * e
             if not args["ablationH"]:
                 embed_A = self.add_lm_embedding(embed_A, kb_len, conv_len, dh_outputs)
             embed_A = self.dropout_layer(embed_A)
@@ -76,7 +77,10 @@ class ExternalKnowledge(nn.Module):
             if(len(list(u[-1].size()))==1): 
                 u[-1] = u[-1].unsqueeze(0) ## used for bsz = 1.
             u_temp = u[-1].unsqueeze(1).expand_as(embed_A)
-            prob_logit = torch.sum(embed_A*u_temp, 2)
+            prob_logit = torch.sum(embed_A*u_temp, 2) # 哎，这个其实就是q^T点乘c_i^k啦，只不过它是expand之后再相乘然后sum...花里胡哨的
+            # 上面两句和下面两句应该是等价的：
+            # u_temp = u[-1].unsqueeze(-1) # (bsz, hsz, 1)
+            # prob_logit = torch.bmm(embed_A, u_temp).squeeze(-1) # (bsz, seqlen)
             prob_   = self.softmax(prob_logit)
             
             embed_C = self.C[hop+1](story.contiguous().view(story_size[0], -1).long())
@@ -135,11 +139,11 @@ class LocalMemoryDecoder(nn.Module):
         # Initialize variables for vocab and pointer
         all_decoder_outputs_vocab = _cuda(torch.zeros(max_target_length, batch_size, self.num_vocab))
         all_decoder_outputs_ptr = _cuda(torch.zeros(max_target_length, batch_size, story_size[1]))
-        decoder_input = _cuda(torch.LongTensor([SOS_token] * batch_size))
+        decoder_input = _cuda(torch.LongTensor([SOS_token] * batch_size)) # Start Of Sentence
         memory_mask_for_step = _cuda(torch.ones(story_size[0], story_size[1]))
         decoded_fine, decoded_coarse = [], []
         
-        hidden = self.relu(self.projector(encode_hidden)).unsqueeze(0)
+        hidden = self.relu(self.projector(encode_hidden)).unsqueeze(0) # (1, bsz, hsz)
         
         # Start to generate word-by-word
         for t in range(max_target_length):
@@ -148,7 +152,8 @@ class LocalMemoryDecoder(nn.Module):
             _, hidden = self.sketch_rnn(embed_q.unsqueeze(0), hidden)
             query_vector = hidden[0] 
             
-            p_vocab = self.attend_vocab(self.C.weight, hidden.squeeze(0))
+            p_vocab = self.attend_vocab(self.C.weight, hidden.squeeze(0)) # C is the embedding matrix for both the encoder and the decoder,
+                                                                          # whose shape is (vocab_size, embsz)
             all_decoder_outputs_vocab[t] = p_vocab
             _, topvi = p_vocab.data.topk(1)
             
@@ -191,7 +196,7 @@ class LocalMemoryDecoder(nn.Module):
         return all_decoder_outputs_vocab, all_decoder_outputs_ptr, decoded_fine, decoded_coarse
 
     def attend_vocab(self, seq, cond):
-        scores_ = cond.matmul(seq.transpose(1,0))
+        scores_ = cond.matmul(seq.transpose(1,0)) # (bsz, hsz) * (hsz, vocab_sz) = (bsz, vocab_sz)
         # scores = F.softmax(scores_, dim=1)
         return scores_
 

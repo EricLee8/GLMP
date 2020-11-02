@@ -5,11 +5,11 @@ from utils.config import *
 
 def _cuda(x):
     if USE_CUDA:
-        return x.cuda()
+        return x.cuda(device='cuda:'+args['cuda'])
     else:
         return x
 
-class Lang:
+class Lang: # Build a vocabulary with word2idx and idx2word
     def __init__(self):
         self.word2index = {}
         self.index2word = {PAD_token: "PAD", SOS_token: "SOS", EOS_token: "EOS", UNK_token: 'UNK'}
@@ -67,7 +67,7 @@ class Dataset(data.Dataset):
             except:
                 data_info[k] = self.data_info[k][index]
 
-        # additional plain information
+        # additional plain information (i.e. without preprocessing)
         data_info['context_arr_plain'] = self.data_info['context_arr'][index]
         data_info['response_plain'] = self.data_info['response'][index]
         data_info['kb_arr_plain'] = self.data_info['kb_arr'][index]
@@ -92,7 +92,7 @@ class Dataset(data.Dataset):
         return story
 
     def collate_fn(self, data):
-        def merge(sequences,story_dim):
+        def merge(sequences,story_dim): # 这边其实就是处理那个六元组
             lengths = [len(seq) for seq in sequences]
             max_len = 1 if max(lengths)==0 else max(lengths)
             if (story_dim):
@@ -136,7 +136,7 @@ class Dataset(data.Dataset):
         response = _cuda(response.contiguous())
         selector_index = _cuda(selector_index.contiguous())
         ptr_index = _cuda(ptr_index.contiguous())
-        conv_arr = _cuda(conv_arr.transpose(0,1).contiguous())
+        conv_arr = _cuda(conv_arr.transpose(0,1).contiguous()) # since the RNN is not set to `batch_first`, we must transpose it
         sketch_response = _cuda(sketch_response.contiguous())
         if(len(list(kb_arr.size()))>1): kb_arr = _cuda(kb_arr.transpose(0,1).contiguous())
         
@@ -157,7 +157,7 @@ class Dataset(data.Dataset):
         return data_info
 
 
-def get_seq(pairs, lang, batch_size, type):   
+def get_seq(pairs, lang, batch_size, type_):   
     data_info = {}
     for k in pairs[0].keys():
         data_info[k] = []
@@ -165,7 +165,7 @@ def get_seq(pairs, lang, batch_size, type):
     for pair in pairs:
         for k in pair.keys():
             data_info[k].append(pair[k])
-        if(type):
+        if(type_):
             lang.index_words(pair['context_arr'])
             lang.index_words(pair['response'], trg=True)
             lang.index_words(pair['sketch_response'], trg=True)
@@ -173,6 +173,6 @@ def get_seq(pairs, lang, batch_size, type):
     dataset = Dataset(data_info, lang.word2index, lang.word2index)
     data_loader = torch.utils.data.DataLoader(dataset = dataset,
                                               batch_size = batch_size,
-                                              shuffle = type,
+                                              shuffle = type_,
                                               collate_fn = dataset.collate_fn)
     return data_loader

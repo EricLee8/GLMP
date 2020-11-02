@@ -21,9 +21,9 @@ class GLMP(nn.Module):
         super(GLMP, self).__init__()
         self.name = "GLMP"
         self.task = task
-        self.input_size = lang.n_words
+        self.input_size = lang.n_words # Vocabulary size
         self.output_size = lang.n_words
-        self.hidden_size = hidden_size    
+        self.hidden_size = hidden_size
         self.lang = lang
         self.lr = lr
         self.n_layers = n_layers
@@ -57,9 +57,9 @@ class GLMP(nn.Module):
         self.reset()
 
         if USE_CUDA:
-            self.encoder.cuda()
-            self.extKnow.cuda()
-            self.decoder.cuda()
+            self.encoder.cuda(device='cuda:'+args['cuda'])
+            self.extKnow.cuda(device='cuda:'+args['cuda'])
+            self.decoder.cuda(device='cuda:'+args['cuda'])
 
     def print_loss(self):    
         print_loss_avg = self.loss / self.print_every
@@ -84,7 +84,7 @@ class GLMP(nn.Module):
     
     def _cuda(self, x):
         if USE_CUDA:
-            return torch.Tensor(x).cuda()
+            return torch.Tensor(x).cuda(device='cuda:'+args['cuda'])
         else:
             return torch.Tensor(x)
 
@@ -131,31 +131,31 @@ class GLMP(nn.Module):
         # Build unknown mask for memory
         if args['unk_mask'] and self.decoder.training:
             story_size = data['context_arr'].size()
-            rand_mask = np.ones(story_size)
+            rand_mask = np.ones(story_size) # (bsz, seqlen, memory_size)
             bi_mask = np.random.binomial([np.ones((story_size[0],story_size[1]))], 1-self.dropout)[0]
             rand_mask[:,:,0] = rand_mask[:,:,0] * bi_mask
-            conv_rand_mask = np.ones(data['conv_arr'].size())
+            conv_rand_mask = np.ones(data['conv_arr'].size()) # (seqlen, bsz, msz)
             for bi in range(story_size[0]):
-                start, end = data['kb_arr_lengths'][bi],  data['kb_arr_lengths'][bi] + data['conv_arr_lengths'][bi]
-                conv_rand_mask[:end-start,bi,:] = rand_mask[bi,start:end,:]
+                start, end = data['kb_arr_lengths'][bi], data['kb_arr_lengths'][bi] + data['conv_arr_lengths'][bi]
+                conv_rand_mask[:end-start,bi,:] = rand_mask[bi,start:end,:] # conv_rand_mask: Batch_first=False
             rand_mask = self._cuda(rand_mask)
             conv_rand_mask = self._cuda(conv_rand_mask)
-            conv_story = data['conv_arr'] * conv_rand_mask.long()
-            story = data['context_arr'] * rand_mask.long()
+            conv_story = data['conv_arr'] * conv_rand_mask.long() # (seqlen, bsz, msz)
+            story = data['context_arr'] * rand_mask.long() # (bsz, seqlen, msz)
         else:
             story, conv_story = data['context_arr'], data['conv_arr']
         
         # Encode dialog history and KB to vectors
         dh_outputs, dh_hidden = self.encoder(conv_story, data['conv_arr_lengths'])
         global_pointer, kb_readout = self.extKnow.load_memory(story, data['kb_arr_lengths'], data['conv_arr_lengths'], dh_hidden, dh_outputs)
-        encoded_hidden = torch.cat((dh_hidden.squeeze(0), kb_readout), dim=1) 
+        encoded_hidden = torch.cat((dh_hidden.squeeze(0), kb_readout), dim=1) # (bsz, hsz*2)
         
         # Get the words that can be copy from the memory
         batch_size = len(data['context_arr_lengths'])
         self.copy_list = []
         for elm in data['context_arr_plain']:
             elm_temp = [ word_arr[0] for word_arr in elm ]
-            self.copy_list.append(elm_temp) 
+            self.copy_list.append(elm_temp)
         
         outputs_vocab, outputs_ptr, decoded_fine, decoded_coarse = self.decoder.forward(
             self.extKnow, 
