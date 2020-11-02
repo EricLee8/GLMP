@@ -21,18 +21,3 @@ or GLMP SMD
 ```console
 ❱❱❱ python myTest.py -ds=kvr -path=<path_to_saved_model> -rec=1
 ```
-
-## Visualization Memory Access
-Memory attention visualization in the SMD navigation domain. Left column is the global memory pointer G, middle column is the memory pointer without global weighting, and the right column is the final memory pointer.
-
-<p align="center">
-<img src="img/VIZ.png" width="100%" />
-</p>
-
-## Architecture
-<p align="center">
-<img src="img/new_enc.png" width="40%" />
-<img src="img/new_dec.png" width="50%" />
-</p>
-
-## Enjoy! :)
